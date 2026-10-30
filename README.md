@@ -1,2 +1,2 @@
 # Wedding-photo-downloader
-just to scratch photos from the wedding webpages you were invited to and to download those pics without paying
+To scrape photos from wedding websites you were invited to and download those pics for free
