@@ -1,0 +1,128 @@
+(async function() {
+const procesadas = new Set();
+let contador = 1;
+
+console.log("🚀 Motor inteligente por lotes (HD) iniciado...");
+
+// 1. Detectar el contenedor real de scroll de la página
+function obtenerScrollable() {
+const root = document.scrollingElement || document.documentElement;
+const candidatos = [{ el: root, delta: root.scrollHeight - root.clientHeight }];
+if (document.body) {
+candidatos.push({ el: document.body, delta: document.body.scrollHeight - document.body.clientHeight });
+}
+document.querySelectorAll('div, main, section, article').forEach(el => {
+const s = getComputedStyle(el);
+if ((s.overflowY === 'auto' || s.overflowY === 'scroll') && el.scrollHeight > el.clientHeight + 200) {
+candidatos.push({ el, delta: el.scrollHeight - el.clientHeight });
+}
+});
+candidatos.sort((a, b) => b.delta - a.delta);
+return candidatos[0].el;
+}
+
+// 2. Extraer la mejor resolución del srcset o src
+function mejorSrc(img) {
+let best = img.currentSrc || img.src || img.dataset.src || '';
+if (img.srcset) {
+try {
+const partes = img.srcset.split(',').map(s => s.trim()).filter(Boolean);
+let maxW = 0;
+for (const p of partes) {
+const [url, desc = ''] = p.split(/\s+/);
+const w = desc.endsWith('w') ? parseInt(desc) : (parseInt(desc) * 2 || 0);
+if (w >= maxW && url) { maxW = w; best = url; }
+}
+} catch (_) {}
+}
+return best;
+}
+
+// 3. Forzar parámetros de máxima calidad en Pic-Time
+function optimizarUrl(src) {
+if (!src) return null;
+try {
+const u = new URL(src, location.href);
+if (u.hostname.includes('pic-time')) {
+u.searchParams.set('width', '3000');
+u.searchParams.set('height', '3000');
+u.searchParams.set('quality', '100');
+}
+return u.toString();
+} catch (_) { return src; }
+}
+
+const scroller = obtenerScrollable();
+let finAlcanzado = false;
+let alturaAnterior = 0;
+
+// Bucle principal: avanza haciendo scroll y descarga por lotes conforme aparecen fotos nuevas
+while (!finAlcanzado) {
+const nuevasImgs = [];
+
+// Recolectar imágenes válidas visibles o cargadas en este punto
+document.querySelectorAll('img').forEach(img => {
+const raw = mejorSrc(img);
+if (!raw || !img.complete || img.naturalWidth < 200) return;
+const low = raw.toLowerCase();
+if (low.includes('render.jpg') || low.includes('avatar') || low.includes('icon') || low.includes('logo')) return;
+
+const src = optimizarUrl(raw);
+if (src && !procesadas.has(src)) {
+procesadas.add(src);
+nuevasImgs.push(src);
+}
+});
+
+// Si encuentra fotos nuevas, las procesa en bloques de 10
+if (nuevasImgs.length > 0) {
+console.log(`📦 Lote detectado: ${nuevasImgs.length} fotos nuevas. Descargando...`);
+
+for (let i = 0; i < nuevasImgs.length; i += 10) {
+const lote = nuevasImgs.slice(i, i + 10);
+
+for (const src of lote) {
+const num = String(contador++).padStart(4, '0');
+try {
+const res = await fetch(src);
+const blob = await res.blob();
+const blobUrl = URL.createObjectURL(blob);
+
+const a = document.createElement('a');
+a.href = blobUrl;
+a.download = `boda_hd_${num}.jpg`;
+document.body.appendChild(a);
+a.click();
+a.remove();
+setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+
+console.log(`✅ Descargada HD: boda_hd_${num}.jpg`);
+} catch (err) {
+console.warn(`⚠️ Error descargando la imagen ${num} (posible bloqueo CORS).`);
+}
+await new Promise(r => setTimeout(r, 400));
+}
+
+// Pausa breve entre bloques de 10 para no saturar el navegador
+await new Promise(r => setTimeout(r, 1000));
+}
+}
+
+// Avanzar el scroll un paso inteligente
+const posAnterior = scroller.scrollTop;
+const paso = Math.max(500, Math.floor(scroller.clientHeight * 0.8));
+scroller.scrollTop = Math.min(scroller.scrollTop + paso, scroller.scrollHeight);
+window.scrollBy(0, paso);
+
+await new Promise(r => setTimeout(r, 1200));
+
+// Comprobar si hemos llegado al final absoluto de la página
+if (scroller.scrollTop === posAnterior || scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 20) {
+if (scroller.scrollHeight === alturaAnterior) {
+finAlcanzado = true;
+console.log("🎉 ¡Fin de la galería alcanzado! Todas las fotos procesadas.");
+}
+alturaAnterior = scroller.scrollHeight;
+}
+}
+})();
